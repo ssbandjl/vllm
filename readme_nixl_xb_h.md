@@ -403,7 +403,9 @@ KVConnectorFactory.register_connector(
 要不要我给你画个 **调度器 – WorkerPool – nixl – RDMA device** 的框图，让 nixl 在 vLLM 架构里的位置更直观？
 
 
-# 解读其连接器实现
+
+
+# 解读其连接器实现 nixl_connector.py
 下面按你贴的这段代码，把 **vLLM 的 NixlConnector** 关键结构、调度/工作两端的职责、元数据流转、以及它如何决定“该不该去拉取远端 KV 块”这几件事讲清楚。重点会结合你之前提过的场景（prompt < block 时 P worker 发送 empty `remote_block_ids`、D worker 不应发起异步 RDMA 读取）。
 
 ---
