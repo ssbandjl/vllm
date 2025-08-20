@@ -174,4 +174,3 @@ self.backend_name = backend.get_name()
 
 # KVConnectorBase_V1基类
 
-
