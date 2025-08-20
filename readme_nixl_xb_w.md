@@ -106,3 +106,72 @@
 
 
 
+# 注意力简介
+你贴的这段代码是 **vLLM** 里 Attention（注意力）实现的后端选择逻辑。我们逐行拆开：
+
+```python
+backend = get_attn_backend(
+    self.model_config.get_head_size(),        # 每个 attention head 的维度大小
+    self.model_config.dtype,                  # 模型的参数精度 (fp16/bf16/fp32)
+    self.cache_config.cache_dtype,            # KV Cache 的存储精度
+    self.block_size,                          # 解码时 block 的大小 (token block 数量)
+    self.model_config.is_attention_free,      # 模型是否是 attention-free（比如 MLP-only, Linear Attention）
+    use_mla=self.use_mla                      # 是否使用 MLA (Multi-head Latent Attention) 优化
+)
+self.backend_name = backend.get_name()
+```
+
+---
+
+### 🔑 关键点解释
+
+1. **Attention 的核心任务**
+
+   * 输入 `Q, K, V` 三个张量，计算
+
+     $$
+     \text{Attention}(Q,K,V) = \text{Softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
+     $$
+   * 在大模型推理里，Attention 是最耗时、最耗显存的模块 → 特别是 KV cache 访问和矩阵乘法。
+
+2. **get\_attn\_backend(...)**
+   vLLM 根据配置选择不同的 Attention 内核（backend）。常见 backend 有：
+
+   * **FlashAttention**（CUDA kernel，高效 IO，省显存）
+   * **PagedAttention**（vLLM 自研，支持 KV cache 分块管理，节省内存，支持动态 context length）
+   * **Fused Attention**（比如 cutlass/cublas 融合实现）
+   * **MLA (Multi-head Latent Attention)** → 一种改进版的 Attention，减少计算和显存开销
+
+   选择逻辑取决于：
+
+   * `head_size`（head 维度大小决定 kernel 支持性，比如 FlashAttention 要求 64 的倍数）
+   * `dtype`（fp16/bf16 支持更好，fp32 可能退化到 naive kernel）
+   * `cache_dtype`（KV Cache 的精度，比如 fp16/int8）
+   * `block_size`（是否需要分块 KV Cache）
+   * `is_attention_free`（如果模型根本不需要 Attention，直接返回 dummy backend）
+   * `use_mla`（是否启用 MLA 优化）
+
+3. **backend.get\_name()**
+   会返回当前使用的 Attention 内核名字，比如：
+
+   * `"flash_attn"`
+   * `"paged_attn"`
+   * `"fused_attn"`
+   * `"mla_attn"`
+   * `"naive_attn"`
+
+---
+
+✅ 总结一句：
+`attn` 这里指的是 **模型推理中注意力计算的执行后端**，`get_attn_backend` 会根据模型 head size、精度、KV cache 设置等条件，选择合适的 Attention kernel，实现推理时的性能/显存优化。
+
+---
+
+要不要我帮你画一张 **vLLM 里 Attention backend 选择流程图**（条件 → backend）？这样你就能一眼看出代码跑到哪个分支。
+
+
+
+
+# KVConnectorBase_V1基类
+
+
