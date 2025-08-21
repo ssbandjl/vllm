@@ -174,3 +174,136 @@ self.backend_name = backend.get_name()
 
 # KVConnectorBase_V1基类
 
+
+
+
+# 提交函数
+self._handshake_initiation_executor.submit
+
+
+
+# load_kv
+class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
+execute_model
+maybe_get_kv_connector_output
+
+start_load_kv -> _read_blocks_for_req -> _read_blocks
+
+
+
+# GPU执行器
+好的 👍 我来帮你解析一下 `vllm` 里的
+
+```python
+class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
+```
+
+这个类的设计目的和继承关系。
+
+---
+
+## 1. 背景
+
+在 `vLLM` 中，**ModelRunner** 系列类负责管理模型在 **不同硬件后端（CPU/GPU/TPU 等）** 的执行。
+
+* `GPUModelRunner`：专门负责 GPU 上的推理执行。
+* 它继承了两个 **Mixin（功能混入类）**：
+
+  * `LoRAModelRunnerMixin`：提供 LoRA（低秩适配）相关的能力。
+  * `KVConnectorModelRunnerMixin`：提供 KV Cache 远程/本地交互的能力。
+
+也就是说，`GPUModelRunner` 本身是一个 **“主控类”**，通过 mixin 组合方式扩展了 LoRA 与 KV Cache 功能。
+
+---
+
+## 2. 继承关系解析
+
+```python
+class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
+```
+
+* **LoRAModelRunnerMixin**
+
+  * 管理 LoRA 权重的加载/合并。
+  * 在推理时动态切换 LoRA adapter，避免重复拷贝大模型权重。
+  * 提供与基础模型权重融合的计算逻辑（通常是 `y = W·x + ΔW·x`）。
+
+* **KVConnectorModelRunnerMixin**
+
+  * 用于管理 KV Cache 的远程通信（比如在多机多卡的场景）。
+  * 抽象了 KV 连接器（KVConnector）的接口，使得 GPU 推理时可以无感地从 **远程节点拉 KV** 或 **写回本地 KV**。
+  * 对应 vLLM 的分布式 KVCache 特性，特别是和 `nixl` 相关的通信流程。
+
+* **GPUModelRunner 自身**
+
+  * 持有 CUDA/GPU 相关的资源（模型权重、CUDA stream、GPU memory allocator）。
+  * 调度推理批次，把输入张量送到 GPU，调用模型 forward，再收集输出 logits。
+  * 作为 `vLLM` GPU 执行的核心执行器（executor）。
+
+---
+
+## 3. 关键职责
+
+整理一下 `GPUModelRunner` 的职责：
+
+1. **模型加载与初始化**
+
+   * 将大模型权重 load 到 GPU 内存。
+   * 如果启用 LoRA，调用 `LoRAModelRunnerMixin` 的逻辑来加载 LoRA adapter。
+
+2. **推理执行（forward pass）**
+
+   * 管理 GPU 上的 batch 执行。
+   * 调用底层 CUDA kernel 或 TensorRT / custom CUDA 算子完成 forward。
+
+3. **KV Cache 管理**
+
+   * 如果 KV Cache 在本地 GPU，直接读取/写入。
+   * 如果 KV Cache 需要跨机器共享，调用 `KVConnectorModelRunnerMixin` 与远程通信。
+
+4. **资源与调度**
+
+   * 分配显存（activation、KV cache、临时 buffer）。
+   * 管理 CUDA stream，保证异步执行。
+   * 和上层调度器（比如 `Engine`）协同工作。
+
+---
+
+## 4. 类似 UML 结构
+
+大概可以想象成这样：
+
+```
+                 +----------------------+
+                 |    LoRAModelRunner   |
+                 +----------------------+
+                          ^
+                          |
+                 +----------------------+
+                 | KVConnectorModelRunner|
+                 +----------------------+
+                          ^
+                          |
+                 +----------------------+
+                 |    GPUModelRunner    |
+                 +----------------------+
+```
+
+---
+
+## 5. 总结
+
+所以：
+
+* `GPUModelRunner` = **GPU 执行器**
+* `LoRAModelRunnerMixin` = **LoRA 权重支持**
+* `KVConnectorModelRunnerMixin` = **KV Cache 远程通信支持**
+
+最终它结合了 **大模型推理 (GPU)** + **LoRA 适配** + **KV 分布式能力**，是 vLLM 分布式推理的核心执行类之一。
+
+---
+
+要不要我帮你顺藤摸瓜，把 `GPUModelRunner` 的 **构造函数和关键方法（如 forward / execute\_model）代码展开解析**？这样你能更清晰地看到它具体怎么组合 LoRA 和 KVConnector。
+
+
+
