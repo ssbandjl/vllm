@@ -43,6 +43,8 @@ def _lora_shrink_kernel(
     SPLIT_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     SLICE_NUM: tl.constexpr,
+    USE_GDC: tl.constexpr,
+    launch_pdl: tl.constexpr,
 ):
     cta_n_num = tl.cdiv(N, BLOCK_N)
     cta_m_num = tl.cdiv(M, BLOCK_M)
@@ -83,7 +85,6 @@ def _lora_shrink_kernel(
     cta_lora_seq_indices = (
         token_indices_sorted_by_lora_ids + lora_m_indices_start + cta_m_offset
     )
-
     # Load all relevant row indices.
     offset_m = tl.arange(0, BLOCK_M) % cta_m_len
     ram = tl.load(cta_lora_seq_indices + offset_m)
@@ -118,6 +119,7 @@ def _lora_shrink_kernel(
         EVEN_K,
         SPLIT_K,
         SLICE_NUM,
+        USE_GDC,
     )
 
 
@@ -132,6 +134,7 @@ def _lora_shrink(
     lora_token_start_loc: torch.Tensor,  # shape [max-loras + 2]
     lora_ids: torch.Tensor,  # shape [max-loras + 1]
     no_lora_flag_cpu: torch.Tensor,  # shape [1]
+    num_active_loras: int,  # number of active LoRAs (unused here, for API compat)
     scaling: float,
 ) -> None:
     """
@@ -212,12 +215,11 @@ def _lora_shrink(
     grid = (
         SPLIT_K * triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),
         NUM_SLICES,
-        # Each LoRA receives its own set of thread blocks for output
-        # computation. If some LoRA doesn't have any tokens to process, its
-        # thread blocks exit early.
-        MAX_LORAS,
+        num_active_loras,
     )
-
+    # We disable PDL temporarily because LoRA kernels are not launching back-to-back,
+    # making PDL invalid and affecting the kernel performance.
+    use_gdc = False  # supports_pdl(inputs.device)
     _lora_shrink_kernel[grid](
         inputs,
         lora_ptr_tensor,
@@ -245,9 +247,11 @@ def _lora_shrink(
         SPLIT_K,
         GROUP_SIZE_M,
         NUM_SLICES,
+        use_gdc,
         num_warps=NUM_WARPS,
         num_ctas=NUM_CTAS,
         num_stages=NUM_STAGES,
+        launch_pdl=use_gdc,
     )
 
     return
@@ -263,6 +267,7 @@ def _lora_shrink_fake(
     lora_token_start_loc: torch.Tensor,
     lora_ids: torch.Tensor,
     no_lora_flag_cpu: torch.Tensor,
+    num_active_loras: int,
     scaling: float,
 ) -> None:
     return
